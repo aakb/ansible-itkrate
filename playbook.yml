@@ -2,22 +2,22 @@
 - hosts: all
   become_method: sudo
   vars:
-    NORMAL_USER_NAME: 'vagrant'
-    GROUP: 'vagrant'
+    NORMAL_USER_NAME: 'deploy'
+    GROUP: 'deploy'
     SITE_PATH: 'sites/'
-    LOG_PATH: '/var/log/apache2/'
+    LOG_PATH: '/home/www/itkrate_dk/logs'
 
 #  ansible-playbook -i "itkore.vm," --ask-pass --user=vagrant ansible/playbook.yml
 
   vars_prompt:
     - name: 'PATH'
       prompt: 'Path'
-      default: '/vagrant'
+      default: '/home/www/itkrate_dk/'
       private: no
 
     - name: 'FQDN'
-      prompt: 'FQDN'
-      default: 'test.itkore.vm'
+      prompt: 'Full domain name'
+      default: 'x.itkrate.dk'
       private: no
 
     - name: 'THEME'
@@ -31,7 +31,7 @@
 
     - name: 'DRUPAL_SITENAME'
       prompt: 'Enter the site name as seen by users'
-      default: 'ITKrate test'
+      default: 'ITKrate x'
       private: no
 
     - name: 'DRUPAL_EDITOR_USER'

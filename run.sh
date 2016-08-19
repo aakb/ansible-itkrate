@@ -1,2 +1,2 @@
 #!/bin/bash
-ansible-playbook -i "itkore.vm," --ask-pass --user=vagrant playbook.yml
+ansible-playbook -i "localhost," -c local playbook.yml
