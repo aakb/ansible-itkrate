@@ -1,0 +1,188 @@
+---
+- hosts: all
+  become_method: sudo
+  vars:
+    NORMAL_USER_NAME: 'vagrant'
+    GROUP: 'vagrant'
+    SITE_PATH: 'sites/'
+    LOG_PATH: '/var/log/apache2/'
+
+#  ansible-playbook -i "itkore.vm," --ask-pass --user=vagrant ansible/playbook.yml
+
+  vars_prompt:
+    - name: 'PATH'
+      prompt: 'Path'
+      default: '/vagrant'
+      private: no
+
+    - name: 'FQDN'
+      prompt: 'FQDN'
+      default: 'test.itkore.vm'
+      private: no
+
+    - name: 'THEME'
+      prompt: 'Theme (itkore_base, itkore_blue, itkore_orange)'
+      default: 'itkore_base'
+      private: no
+
+    - name: 'MYSQL_USERNAME'
+      prompt: 'MySql username (max. 14 chars)'
+      private: no
+
+    - name: 'DRUPAL_SITENAME'
+      prompt: 'Enter the site name as seen by users'
+      default: 'ITKrate test'
+      private: no
+
+    - name: 'DRUPAL_EDITOR_USER'
+      prompt: 'Enter editor user name'
+      default: 'editor'
+      private: no
+
+    - name: 'DRUPAL_EDITOR_PASSWORD'
+      prompt: 'Enter editor password'
+      default: 'editor'
+      private: no
+
+    - name: 'DRUPAL_EDITOR_MAIL'
+      prompt: 'Enter editor email'
+      default: 'wwwadmin@aakb.dk'
+      private: no
+
+  tasks:
+    - name: Check that the server's alive
+      action: ping
+
+    - name: Extract site folder
+      set_fact: SITE_FOLDER="{{ FQDN | regex_replace("\.", "_" ) }}"
+
+    # * Create a new database for the site (if there is already an existing database you can
+    #   also use this by defining a prefix in the installation procedure).
+    - name : Create MySQL Database
+      mysql_db: name={{ SITE_FOLDER }} state=present
+      become: yes
+      tags:
+        - mysql
+
+    - name: Create MySQL DB
+      mysql_user: name={{ MYSQL_USERNAME }}
+                  password="{{ lookup('password', 'credentials/' + SITE_FOLDER + '/' + '/mysqlpassword chars=ascii_letters,digits,hexdigits') }}"
+                  priv=*.*:ALL
+      become: yes
+      tags:
+        - mysql
+
+    - name: Save MySQL password
+      set_fact: MYSQL_PWD="{{ lookup('file', 'credentials/' + SITE_FOLDER + '/' + '/mysqlpassword') }}"
+      tags:
+        - mysql
+
+    # # * Create a new subdirectory of the 'sites' directory with the name of your new site.
+    # #   See below or the comments in the default.settings.php file for information on how
+    # #   to name the subdirectory.
+    # - name: Create sub-site folder ({{ FQDN }})
+    #   file: path={{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }} state=directory mode=775
+    #   become: no
+    #   tags:
+    #     - folder
+
+    # # * Copy the file sites/default/default.settings.php into the subdirectory you created
+    # #   in the previous step. Rename the new file to settings.php.
+    # - name: Copy settings file
+    #   template: src=default.settings.php.j2 dest={{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}/settings.php mode=0664
+    #   become: no
+    #   tags:
+    #     - drupal
+
+
+    # * For Drupal 8 only: Activate the multi-site feature by copying (and renaming) the file
+    #   sites/example.sites.php to sites/sites.php. There is no need to edit the file unless
+    #   you need site aliases. The normal site selection rules applies.
+    - name: Check sites file
+      template: src=example.sites.php.j2 dest={{ PATH }}/htdocs/{{ SITE_PATH }}/sites.php force=no mode=0664
+      become: no
+      tags:
+        - drupal
+
+    # Apache configuartion
+    - name: Add vhost
+      template: src=vhost.conf.j2 dest=/etc/apache2/sites-available/{{ SITE_FOLDER }}.conf owner=root mode=0644
+      become: yes
+      tags:
+        - apache
+
+    - name: Enabled vhost
+      command: /usr/sbin/a2ensite {{ SITE_FOLDER }}.conf
+      become: yes
+      tags:
+        - apache
+
+    - name: Reload apache
+      service: name=apache2 state=reloaded
+      become: yes
+      tags:
+        - apache
+
+    - name: Install Drupal
+      command: drush --yes --root="{{ PATH }}/htdocs" site-install itkore --db-url="mysql://{{ MYSQL_USERNAME }}:{{ MYSQL_PWD }}@localhost/{{ SITE_FOLDER }}" --sites-subdir={{ FQDN }} --site-name='{{ DRUPAL_SITENAME }}' --account-name=admin --account-mail=itkdesign@mkb.aarhus.dk --locale=da
+      tags:
+        - drupal
+
+    - name: Default language
+      command: "drush --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' config-set {{ item.name }} {{ item.setting }} '{{ item.value }}' -y"
+      with_items:
+        - { 'name': 'system.site', 'setting': 'langcode', 'value': 'da' }
+        - { 'name': 'system.site', 'setting': 'default_langcode', 'value': 'da' }
+        - { 'name': 'language.types', 'setting': 'negotiation.language_interface.enabled.language-url', 'value': '' }
+        - { 'name': 'language.negotiation', 'setting': 'url.prefixes.da', 'value': '' }
+        - { 'name': 'system.theme', 'setting': 'default', 'value': '{{ THEME }}' }
+      tags:
+        - drupal
+        - local
+
+    - name: Enable theme {{ THEME }}
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' en {{ THEME }}
+      tags:
+        - drupal
+        - content
+
+    # Editor user
+    - name: Added editor user
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' user-create {{ DRUPAL_EDITOR_USER }} --mail="{{ DRUPAL_EDITOR_MAIL }}" --password="{{ DRUPAL_EDITOR_PASSWORD }}"
+      tags:
+        - drupal
+        - user
+
+    - name: Set editor user role
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' user-add-role editor {{ DRUPAL_EDITOR_USER }}
+      tags:
+        - drupal
+        - user
+
+    - name: Enable intro content
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' en itkore_intro
+      tags:
+        - drupal
+        - content
+
+    - name: Enable default content
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' en itkore_default_content
+      tags:
+        - drupal
+        - content
+
+    - name: Set permissions
+      file: path={{ item }} state=directory mode=0775
+      with_items:
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}"
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/images"
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/uploads"
+
+    - name: Search for language updates
+      command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' {{ item }}
+      with_items:
+        - locale-check
+        - locale-update
+      tags:
+        - drupal
+        - language
