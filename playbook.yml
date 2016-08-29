@@ -59,13 +59,13 @@
     # * Create a new database for the site (if there is already an existing database you can
     #   also use this by defining a prefix in the installation procedure).
     - name : Create MySQL Database
-      mysql_db: name={{ SITE_FOLDER }} state=present
+      mysql_db: name="{{ SITE_FOLDER }}" state=present
       become: yes
       tags:
         - mysql
 
     - name: Create MySQL DB
-      mysql_user: name={{ MYSQL_USERNAME }}
+      mysql_user: name="{{ MYSQL_USERNAME }}"
                   password="{{ lookup('password', 'credentials/' + SITE_FOLDER + '/' + '/mysqlpassword chars=ascii_letters,digits,hexdigits') }}"
                   priv=*.*:ALL
       become: yes
@@ -77,30 +77,42 @@
       tags:
         - mysql
 
-    # # * Create a new subdirectory of the 'sites' directory with the name of your new site.
-    # #   See below or the comments in the default.settings.php file for information on how
-    # #   to name the subdirectory.
-    # - name: Create sub-site folder ({{ FQDN }})
-    #   file: path={{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }} state=directory mode=775
-    #   become: no
-    #   tags:
-    #     - folder
+    # * Create a new subdirectory of the 'sites' directory with the name of your new site.
+    #   See below or the comments in the default.settings.php file for information on how
+    #   to name the subdirectory.
+    - name: Create sub-site folder ({{ FQDN }})
+      file: path="{{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}" state=directory mode=775 owner=www-data group="{{ NORMAL_USER_NAME }}"
+      become: yes
+      tags:
+        - folder
 
-    # # * Copy the file sites/default/default.settings.php into the subdirectory you created
-    # #   in the previous step. Rename the new file to settings.php.
-    # - name: Copy settings file
-    #   template: src=default.settings.php.j2 dest={{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}/settings.php mode=0664
-    #   become: no
-    #   tags:
-    #     - drupal
+    # Set ACL
+    - name: Set permissions www-data (ACL)
+      acl: name="{{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}" entity=www-data etype=user permissions=rwx default=yes recursive=yes state=present
+      become: yes
+      tags:
+       - folder
 
+    - name: Set permissions {{ NORMAL_USER_NAME }}(ACL)
+      acl: name="{{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}" entity="{{ NORMAL_USER_NAME }}" etype=user permissions=rwx default=yes recursive=yes state=present
+      become: yes
+      tags:
+        - folder
+
+    # * Copy the file sites/default/default.settings.php into the subdirectory you created
+    #   in the previous step. Rename the new file to settings.php.
+    - name: Copy settings file
+      template: src=default.settings.php.j2 dest="{{ PATH }}/htdocs/{{ SITE_PATH }}/{{ FQDN }}/settings.php" mode=0664 owner=www-data group="{{ NORMAL_USER_NAME }}"
+      become: yes
+      tags:
+        - drupal
 
     # * For Drupal 8 only: Activate the multi-site feature by copying (and renaming) the file
     #   sites/example.sites.php to sites/sites.php. There is no need to edit the file unless
     #   you need site aliases. The normal site selection rules applies.
     - name: Check sites file
-      template: src=example.sites.php.j2 dest={{ PATH }}/htdocs/{{ SITE_PATH }}/sites.php force=no mode=0664
-      become: no
+      template: src=example.sites.php.j2 dest={{ PATH }}/htdocs/{{ SITE_PATH }}/sites.php force=no mode=0664 owner=www-data group="{{ NORMAL_USER_NAME }}"
+      become: yes
       tags:
         - drupal
 
@@ -159,6 +171,17 @@
         - drupal
         - user
 
+    - name: Set permissions
+      file: path={{ item }} state=directory mode=0775 owner=www-data group="{{ NORMAL_USER_NAME }}"
+      with_items:
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}"
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/images"
+        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/uploads"
+      become: yes
+      tags:
+        - drupal
+        - content
+
     - name: Enable intro content
       command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' en itkore_intro
       tags:
@@ -170,13 +193,6 @@
       tags:
         - drupal
         - content
-
-    - name: Set permissions
-      file: path={{ item }} state=directory mode=0775
-      with_items:
-        - "{{ PATH }}/htdocs/sites/{{ FQDN }}"
-        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/images"
-        - "{{ PATH }}/htdocs/sites/{{ FQDN }}/files/uploads"
 
     - name: Search for language updates
       command: drush --yes --root='{{ PATH }}/htdocs' --uri='{{ FQDN }}' {{ item }}
